@@ -75,6 +75,10 @@ public class CorrectionObject {
     @Column(name = "last_forbidden")
     private Boolean lastForbidden;
 
+    /** 最近一次定位虽越出活动范围，但处于已批准请假的假期窗口内（准假外出，不算越界） */
+    @Column(name = "last_leave_authorized")
+    private Boolean lastLeaveAuthorized;
+
     /** 最近一次设备状态：电量 0-100 / 信号 0-4 / 是否佩戴 */
     private Integer lastBattery;
     private Integer lastSignal;
@@ -107,6 +111,7 @@ public class CorrectionObject {
     public Double getLastLng() { return lastLng; }
     public Boolean getLastInsideFence() { return lastInsideFence; }
     public Boolean getLastForbidden() { return lastForbidden; }
+    public Boolean getLastLeaveAuthorized() { return lastLeaveAuthorized; }
     public Integer getLastBattery() { return lastBattery; }
     public Integer getLastSignal() { return lastSignal; }
     public Boolean getLastWorn() { return lastWorn; }
@@ -128,6 +133,7 @@ public class CorrectionObject {
     public void setLastLng(Double lastLng) { this.lastLng = lastLng; }
     public void setLastInsideFence(Boolean lastInsideFence) { this.lastInsideFence = lastInsideFence; }
     public void setLastForbidden(Boolean lastForbidden) { this.lastForbidden = lastForbidden; }
+    public void setLastLeaveAuthorized(Boolean lastLeaveAuthorized) { this.lastLeaveAuthorized = lastLeaveAuthorized; }
     public void setLastBattery(Integer lastBattery) { this.lastBattery = lastBattery; }
     public void setLastSignal(Integer lastSignal) { this.lastSignal = lastSignal; }
     public void setLastWorn(Boolean lastWorn) { this.lastWorn = lastWorn; }

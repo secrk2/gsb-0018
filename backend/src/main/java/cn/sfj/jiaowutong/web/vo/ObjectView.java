@@ -16,6 +16,7 @@ public record ObjectView(Long id, String correctionNo, String maskedName, String
                          String charge, String idCardTail, String phone,
                          LocalDate startDate, LocalDate endDate, String reportDay,
                          Instant lastLocationAt, Boolean lastInsideFence, Boolean lastForbidden,
+                         Boolean lastLeaveAuthorized,
                          Double lastLat, Double lastLng,
                          Integer lastBattery, Integer lastSignal, Boolean lastWorn,
                          Double fenceCenterLat, Double fenceCenterLng, Integer fenceRadiusMeters) {
@@ -40,6 +41,7 @@ public record ObjectView(Long id, String correctionNo, String maskedName, String
                 o.getLastLocationAt(),
                 o.getLastInsideFence(),
                 o.getLastForbidden(),
+                o.getLastLeaveAuthorized(),
                 o.getLastLat(),
                 o.getLastLng(),
                 o.getLastBattery(),

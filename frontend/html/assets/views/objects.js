@@ -78,7 +78,9 @@
             ${items.map((o) => {
               const loc = o.lastLocationAt
                 ? `${UI.fmtTzFull(o.lastLocationAt, o.timezone)} ` +
-                  (o.lastInsideFence
+                  (o.lastLeaveAuthorized
+                    ? '<span class="badge LEAVE" style="margin-left:4px">准假外出</span>'
+                    : o.lastInsideFence
                     ? '<span class="badge green" style="margin-left:4px">围栏内</span>'
                     : '<span class="badge red" style="margin-left:4px">📍越界</span>')
                     + (o.lastForbidden ? '<span class="badge red" style="margin-left:4px">禁区</span>' : '')

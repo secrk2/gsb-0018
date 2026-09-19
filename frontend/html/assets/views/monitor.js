@@ -112,7 +112,8 @@
       }
       listEl.innerHTML = items.map((it) => {
         const meta = LINK_META[it.linkState] || LINK_META.NEVER;
-        const anomaly = !it.insideRange || it.forbidden;
+        // 准假外出期间越出活动围栏不算越界（不亮红点），仅禁区仍按异常
+        const anomaly = (!it.insideRange || it.forbidden) && !it.leaveAuthorized;
         const battery = it.battery == null ? '—'
           : `<span class="dev-batt ${it.battery < 20 ? 'low' : ''}">🔋${it.battery}%</span>`;
         const bars = it.signal == null ? '' : `📶${'▮'.repeat(it.signal)}${'▯'.repeat(4 - it.signal)}`;
@@ -121,7 +122,8 @@
           <div class="mon-item-top">
             <span class="mon-dot ${meta.cls}">${meta.icon}</span>
             <b>${UI.esc(it.maskedName)}</b>
-            ${anomaly ? '<span class="badge red" style="margin-left:auto">越界</span>'
+            ${it.leaveAuthorized ? '<span class="badge LEAVE" style="margin-left:auto">准假外出</span>'
+              : anomaly ? '<span class="badge red" style="margin-left:auto">越界</span>'
               : `<span class="mon-link ${meta.cls}" style="margin-left:auto">${meta.label}</span>`}
           </div>
           <div class="mon-item-meta">
@@ -257,7 +259,8 @@
           ${replayHead(r, tz, points.length, last)}
           <div class="map-toolbar">
             <span class="map-hint">🟢活动范围内　<span class="lg-red">●</span>越界落点
-              <span class="lg-purple">●</span>禁区段落点　◯离线补传　<span class="lg-drift">⤳</span>GPS漂移已丢弃（窗口内 ${r.driftDiscardedInWindow} 点，不连线）</span>
+              <span class="lg-purple">●</span>禁区段落点　<span class="lg-leave">●</span>准假外出（假期内不算越界）
+              ◯离线补传　<span class="lg-drift">⤳</span>GPS漂移已丢弃（窗口内 ${r.driftDiscardedInWindow} 点，不连线）</span>
             <button class="btn sm ${state.verifyArmed ? 'primary' : ''}" id="btn-verify-arm">
               ${state.verifyArmed ? '核实模式：点红色落点核实' : '标记越界落点（二次核实）'}</button>
           </div>
@@ -358,15 +361,18 @@
       // 轨迹折线（漂移点已在服务端剔除，这里只画 ACCEPTED）
       const linePts = points.map((p) => `${X(p.lng).toFixed(1)},${Y(p.lat).toFixed(1)}`).join(' ');
       const dots = points.map((p, i) => {
-        const cls = p.forbidden ? 'pt-forbid' : p.outsideFence ? 'pt-out' : 'pt-ok';
+        const cls = p.forbidden ? 'pt-forbid' : p.leaveAuthorized ? 'pt-leave'
+          : p.outsideFence ? 'pt-out' : 'pt-ok';
         const off = p.offlineCaptured ? 'offline' : '';
         const clickable = (p.outsideFence || p.forbidden) ? 'clickable' : '';
         const verified = p.verified ? 'verified' : '';
-        const r0 = (p.outsideFence || p.forbidden) ? 5.5 : 3;
+        const r0 = (p.outsideFence || p.forbidden) ? 5.5 : p.leaveAuthorized ? 4.5 : 3;
+        const whereLabel = p.forbidden ? '禁区段落点' : p.outsideFence ? '越界落点'
+          : p.leaveAuthorized ? '准假外出（假期内不算越界）' : '活动范围内';
         return `<circle class="pt ${cls} ${off} ${clickable} ${verified}" data-id="${p.id}"
                   cx="${X(p.lng).toFixed(1)}" cy="${Y(p.lat).toFixed(1)}" r="${r0}">
                   <title>${UI.fmtTzFull(p.pointTime, r.timezone)}（${UI.esc(r.timezone)}）
-${p.forbidden ? '禁区段落点' : p.outsideFence ? '越界落点' : '活动范围内'}${p.offlineCaptured ? '·离线补传' : ''}
+${whereLabel}${p.offlineCaptured ? '·离线补传' : ''}
 电量${p.battery == null ? '—' : p.battery + '%'} 信号${p.signal == null ? '—' : p.signal} ${p.worn === false ? '未佩戴' : ''}
 ${p.verified ? '已核实：' + UI.esc(p.verifyConclusion || '') : ''}</title>
                 </circle>${p.verified
@@ -375,11 +381,14 @@ ${p.verified ? '已核实：' + UI.esc(p.verifyConclusion || '') : ''}</title>
       }).join('');
 
       const last = points[points.length - 1];
+      const lastCls = last.forbidden ? 'pt-forbid' : last.leaveAuthorized ? 'pt-leave'
+        : last.outsideFence ? 'pt-out' : 'pt-ok';
       const cur = `<g>
         <circle class="cur-pulse" cx="${X(last.lng)}" cy="${Y(last.lat)}" r="8"></circle>
-        <circle class="cur-core ${last.forbidden ? 'pt-forbid' : last.outsideFence ? 'pt-out' : 'pt-ok'}"
+        <circle class="cur-core ${lastCls}"
           cx="${X(last.lng)}" cy="${Y(last.lat)}" r="5"></circle>
-        <text x="${X(last.lng) + 10}" y="${Y(last.lat) + 4}" class="cur-label">当前位置</text>
+        <text x="${X(last.lng) + 10}" y="${Y(last.lat) + 4}" class="cur-label">当前位置${
+          last.leaveAuthorized ? '（准假外出）' : ''}</text>
       </g>`;
 
       return `

@@ -576,6 +576,7 @@ textarea.input { resize: vertical; min-height: 72px; }
 .map-hint { font-size: 12px; color: var(--ink-secondary); }
 .map-hint .lg-red { color: var(--critical); }
 .map-hint .lg-purple { color: #7a3fb5; }
+.map-hint .lg-leave { color: #2a78d6; }
 .map-hint .lg-drift { color: var(--ink-muted); }
 .map-wrap { border: 1px solid var(--hairline); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface-2); }
 .map-svg { display: block; width: 100%; height: auto; max-height: 560px; }
@@ -594,10 +595,12 @@ textarea.input { resize: vertical; min-height: 72px; }
 .pt-ok { fill: var(--good); stroke: #fff; }
 .pt-out { fill: var(--critical); stroke: #fff; }
 .pt-forbid { fill: #7a3fb5; stroke: #fff; }
+.pt-leave { fill: #2a78d6; stroke: #fff; }
 .pt.offline { fill: var(--surface-1); }
 .pt-ok.offline { stroke: var(--good); }
 .pt-out.offline { stroke: var(--critical); }
 .pt-forbid.offline { stroke: #7a3fb5; }
+.pt-leave.offline { stroke: #2a78d6; }
 .pt.clickable { cursor: pointer; }
 .pt.clickable:hover { stroke-width: 3; }
 .pt.verified { stroke: var(--ink-primary); stroke-width: 2; }
@@ -653,4 +656,28 @@ textarea.input { resize: vertical; min-height: 72px; }
   .pt-ok.offline { stroke: #5fd35f; }
   .cur-label { fill: #9ec5f4; }
   .opposite-warn { border-color: #5a4d22; }
+}
+
+/* ============================================================
+   请销假 / 公益活动 卡片
+   ============================================================ */
+.leave-card { border: 1px solid var(--hairline); border-radius: var(--radius);
+  background: var(--surface-1); padding: 14px 16px; margin-bottom: 12px; }
+.leave-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.leave-title { font-size: 14.5px; }
+.leave-meta { font-size: 12.5px; color: var(--ink-muted); }
+.leave-body { margin-top: 8px; }
+.leave-reason { font-size: 13px; color: var(--ink-secondary); margin-bottom: 4px; line-height: 1.6; }
+.leave-trail summary { cursor: pointer; font-size: 12.5px; color: var(--brand-500); user-select: none; }
+.leave-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;
+  padding-top: 10px; border-top: 1px dashed var(--hairline); }
+
+/* 月度批量结果 */
+.batch-ok { display: flex; flex-wrap: wrap; gap: 6px; }
+.batch-chip { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--hairline); }
+.batch-chip.ok { color: var(--good); background: var(--good-bg); border-color: #bfe3bf; }
+
+@media (max-width: 480px) {
+  .leave-card { padding: 12px; }
+  .leave-actions .btn { flex: 1; }
 }

@@ -22,6 +22,7 @@ public record TrackReplayView(Long objectId, String correctionNo, String maskedN
 
     public record PointView(Long id, Instant pointTime, Double lat, Double lng,
                             boolean offlineCaptured, boolean outsideFence, boolean forbidden,
+                            boolean leaveAuthorized,
                             Integer battery, Integer signal, Boolean worn,
                             boolean verified, String verifyConclusion) {
     }

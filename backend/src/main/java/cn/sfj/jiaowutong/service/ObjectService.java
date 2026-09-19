@@ -137,7 +137,8 @@ public class ObjectService {
                 .stream()
                 .map(t -> new TrackView(t.getClientPointId(), t.getPointTime(), t.getLat(), t.getLng(),
                         t.getOfflineCaptured(), t.getReceivedAt(), t.getOutsideFence(),
-                        Boolean.TRUE.equals(t.getForbiddenZone()), t.getResult().name(),
+                        Boolean.TRUE.equals(t.getForbiddenZone()),
+                        Boolean.TRUE.equals(t.getLeaveAuthorized()), t.getResult().name(),
                         t.getBattery(), t.getSignal(), t.getWorn()))
                 .toList();
     }
@@ -164,6 +165,8 @@ public class ObjectService {
             case "FORBIDDEN_ZONE" -> "禁区闯入";
             case "ABSENT" -> "未按日报到";
             case "ADMONISH" -> "训诫";
+            case "LEAVE_OVERDUE" -> "逾假未归";
+            case "ACTIVITY_ABNORMAL" -> "公益活动异常打卡";
             default -> type;
         };
     }

@@ -115,6 +115,7 @@ public class MonitorService {
                     o.getLastLat(), o.getLastLng(),
                     !Boolean.FALSE.equals(o.getLastInsideFence()),
                     Boolean.TRUE.equals(o.getLastForbidden()),
+                    Boolean.TRUE.equals(o.getLastLeaveAuthorized()),
                     o.getLastBattery(), o.getLastSignal(), o.getLastWorn(), drift24h));
         }
         return new MonitorOverviewView(now, MonitorOverviewView.ONLINE_WITHIN_SEC, items);
@@ -161,6 +162,7 @@ public class MonitorService {
                         Boolean.TRUE.equals(p.getOfflineCaptured()),
                         Boolean.TRUE.equals(p.getOutsideFence()),
                         Boolean.TRUE.equals(p.getForbiddenZone()),
+                        Boolean.TRUE.equals(p.getLeaveAuthorized()),
                         p.getBattery(), p.getSignal(), p.getWorn(),
                         verified.containsKey(p.getId()), verified.get(p.getId())))
                 .toList();

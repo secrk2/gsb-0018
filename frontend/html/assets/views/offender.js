@@ -41,7 +41,8 @@
               : '<span class="badge gray">🕒 尚未报到</span>'}</dd>
             <dt>最近定位</dt><dd>${o.lastLocationAt
               ? UI.fmtTzFull(o.lastLocationAt, o.timezone) + '（' + UI.esc(o.timezone) + '）'
-                + (o.lastInsideFence ? '（围栏内）' : '（<span style="color:var(--critical)">越界</span>）')
+                + (o.lastLeaveAuthorized ? '（<span style="color:var(--brand-600)">准假外出</span>）'
+                  : o.lastInsideFence ? '（围栏内）' : '（<span style="color:var(--critical)">越界</span>）')
               : '暂无'}</dd>
           </dl>
         </div>
@@ -61,6 +62,16 @@
             <button class="btn sm" id="btn-stale" style="width:100%">
               🧪 演示：尝试用 2 小时前的缓存旧定位报到</button>
           </div>
+        </div>
+
+        <div class="phone-card" id="leave-card">
+          <h3>📝 请假与销假</h3>
+          <div id="leave-body"><div class="skeleton">请假单加载中…</div></div>
+        </div>
+
+        <div class="phone-card" id="activity-card">
+          <h3>🤝 公益活动</h3>
+          <div id="activity-body"><div class="skeleton">活动加载中…</div></div>
         </div>
 
         <div class="phone-card">
@@ -232,6 +243,10 @@
            错误码：${UI.esc(e.code || '')}（HTTP 422）。定位时效由服务端时钟裁决。</div>`, '⛔');
       }
     };
+
+    // ----- 请假与销假 / 公益活动 -----
+    LeavePanel.mount(root, o);
+    ActivityPanel.mount(root, o);
 
     // ----- 离线定位 -----
     root.querySelector('#btn-capture').onclick = () => {

@@ -47,6 +47,11 @@ public class DataInitializer implements ApplicationRunner {
     private final GeoFenceRepository fenceRepository;
     private final FenceScheduleRepository scheduleRepository;
     private final MonitorActionRepository monitorActionRepository;
+    private final LeaveApplicationRepository leaveRepository;
+    private final LeaveEventRepository leaveEventRepository;
+    private final PublicActivityRepository activityRepository;
+    private final ActivityEnrollmentRepository enrollmentRepository;
+    private final ActivityAttendanceRepository attendanceRepository;
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
 
@@ -60,6 +65,11 @@ public class DataInitializer implements ApplicationRunner {
                            GeoFenceRepository fenceRepository,
                            FenceScheduleRepository scheduleRepository,
                            MonitorActionRepository monitorActionRepository,
+                           LeaveApplicationRepository leaveRepository,
+                           LeaveEventRepository leaveEventRepository,
+                           PublicActivityRepository activityRepository,
+                           ActivityEnrollmentRepository enrollmentRepository,
+                           ActivityAttendanceRepository attendanceRepository,
                            PasswordEncoder passwordEncoder,
                            ObjectMapper objectMapper) {
         this.officeRepository = officeRepository;
@@ -72,6 +82,11 @@ public class DataInitializer implements ApplicationRunner {
         this.fenceRepository = fenceRepository;
         this.scheduleRepository = scheduleRepository;
         this.monitorActionRepository = monitorActionRepository;
+        this.leaveRepository = leaveRepository;
+        this.leaveEventRepository = leaveEventRepository;
+        this.activityRepository = activityRepository;
+        this.enrollmentRepository = enrollmentRepository;
+        this.attendanceRepository = attendanceRepository;
         this.passwordEncoder = passwordEncoder;
         this.objectMapper = objectMapper;
     }
@@ -285,6 +300,12 @@ public class DataInitializer implements ApplicationRunner {
                 "对象 L-JWT26003 因本周两次未按规定时间报到，被予以训诫",
                 today.minusDays(1).atTime(15, 30).atZone(SH).toInstant()));
 
+        // ---------- 请销假（两级审批）/ 公益活动 / 月度报到 演示数据 ----------
+        CorrectionObject wang = objs.get(1);
+        CorrectionObject li = objs.get(2);
+        seedLeavesAndActivities(chengguan, qingshan, longhu, yining,
+                zhang, wang, wu, yang, zhou, chen, xu, sun, mait, li, now, today);
+
         // ---------- 账号 ----------
         createAccount("jiandu", "陈督导", Role.SUPERVISOR, null, null);
         createAccount("gancheng", "李建国", Role.STAFF, chengguan, null);
@@ -410,6 +431,186 @@ public class DataInitializer implements ApplicationRunner {
                     o.getId(), CorrectionStatus.SERVING, CorrectionStatus.RELEASED, op, "系统（种子数据）", "矫正期满，依法解除社区矫正"));
             default -> { /* SERVING */ }
         }
+    }
+
+    /**
+     * 请销假两级审批 + 公益活动 + 月度报到演示数据。
+     * 请假：王秀兰(已批准·假期中，轨迹在围栏外但不报警)、张伟国(待区局复核)、吴桂芳(逾假未归违规)、
+     *       杨春生(已销假)、周文斌(司法所已退回·待重提)；
+     * 公益活动：青山(打卡进行中：正常+异常)、城关(报名未到点)、龙湖(已结束，全正常)、伊宁(未来场)；
+     * 月度报到：本月若干对象已当面登记。
+     */
+    private void seedLeavesAndActivities(JudicialOffice chengguan, JudicialOffice qingshan,
+                                         JudicialOffice longhu, JudicialOffice yining,
+                                         CorrectionObject zhang, CorrectionObject wang,
+                                         CorrectionObject wu, CorrectionObject yang,
+                                         CorrectionObject zhou, CorrectionObject chen,
+                                         CorrectionObject xu, CorrectionObject sun,
+                                         CorrectionObject mait, CorrectionObject li,
+                                         Instant now, LocalDate today) {
+        // ---------------- 请假单 ----------------
+        // 1) 王秀兰：已批准·假期中（start 昨天 → end 明天）。她的轨迹在围栏外，属准假外出，不产生越界红点。
+        LeaveApplication wangLv = new LeaveApplication(wang, "PERSONAL",
+                "陪母亲到省人民医院复查并办理住院陪护", "省人民医院（外地）",
+                now.minusSeconds(26 * 3600), now.plusSeconds(22 * 3600),
+                LeaveApplication.Status.APPROVED, now.minusSeconds(3 * 86400));
+        wangLv.setOfficeApprovedAt(now.minusSeconds(3 * 86400 + 600));
+        wangLv.setBureauApprovedAt(now.minusSeconds(2 * 86400));
+        leaveRepository.save(wangLv);
+        leaveEvent(wangLv, "SUBMITTED", 0L, wang.getFullName(), "提交请假申请：陪护就医", now.minusSeconds(3 * 86400));
+        leaveEvent(wangLv, "OFFICE_APPROVED", 1L, "李建国", "情况属实，同意请假，报区局复核", now.minusSeconds(3 * 86400 + 600));
+        leaveEvent(wangLv, "BUREAU_APPROVED", 0L, "陈督导", "区局复核通过，准予外出，注意按时销假", now.minusSeconds(2 * 86400));
+
+        // 2) 张伟国：司法所初审已通过，待区局复核（区局工作台有待办）
+        LeaveApplication zhangLv = new LeaveApplication(zhang, "OTHER",
+                "需到邻市处理家中房产过户手续，一日往返", "邻市政务服务中心",
+                now.plusSeconds(2 * 86400), now.plusSeconds(3 * 86400),
+                LeaveApplication.Status.PENDING_BUREAU, now.minusSeconds(5 * 3600));
+        zhangLv.setOfficeApprovedAt(now.minusSeconds(2 * 3600));
+        leaveRepository.save(zhangLv);
+        leaveEvent(zhangLv, "SUBMITTED", 0L, zhang.getFullName(), "提交请假申请：房产过户", now.minusSeconds(5 * 3600));
+        leaveEvent(zhangLv, "OFFICE_APPROVED", 1L, "李建国", "材料齐全，初审同意，报区局复核", now.minusSeconds(2 * 3600));
+
+        // 3) 吴桂芳：假期已结束仍未销假 → 逾假未归（状态已是 LEAVE，补一条逾期违规红点与留痕）
+        LeaveApplication wuLv = new LeaveApplication(wu, "PERSONAL",
+                "回老家处理亲属丧事", "外省老家",
+                now.minusSeconds(3 * 86400), now.minusSeconds(26 * 3600),
+                LeaveApplication.Status.OVERDUE, now.minusSeconds(6 * 86400));
+        wuLv.setOfficeApprovedAt(now.minusSeconds(6 * 86400 + 600));
+        wuLv.setBureauApprovedAt(now.minusSeconds(5 * 86400));
+        wuLv.setOverdueFlag(true);
+        leaveRepository.save(wuLv);
+        leaveEvent(wuLv, "SUBMITTED", 0L, wu.getFullName(), "提交请假申请：返乡奔丧", now.minusSeconds(6 * 86400));
+        leaveEvent(wuLv, "OFFICE_APPROVED", 3L, "韩雪梅", "初审同意，报区局复核", now.minusSeconds(6 * 86400 + 600));
+        leaveEvent(wuLv, "BUREAU_APPROVED", 0L, "陈督导", "准予事假，要求按期销假", now.minusSeconds(5 * 86400));
+        leaveEvent(wuLv, "SYSTEM_OVERDUE", 0L, "系统（逾期巡检）",
+                "假期截止仍未销假，自动登记逾假未归违规", now.minusSeconds(26 * 3600));
+        violationRepository.save(new ViolationEvent(wu, "LEAVE_OVERDUE",
+                "对象 W-JWT26010 请假至 " + now.minusSeconds(26 * 3600)
+                        + " 已到期但未销假，系统按逾假未归自动升为违规（请假单号 #" + wuLv.getId() + "）",
+                now.minusSeconds(26 * 3600)));
+        // 逾假未归：对象状态由请假外出升训诫（与定时任务 markOverdue 的处置一致）
+        wu.setStatus(CorrectionStatus.ADMONISHED);
+        objectRepository.save(wu);
+        transitionRepository.save(new StatusTransition(wu.getId(),
+                CorrectionStatus.LEAVE, CorrectionStatus.ADMONISHED, 0L, "系统（逾期巡检）",
+                "假期结束未销假，逾假未归，系统自动升为违规（训诫）；事后销假可恢复在矫"));
+
+        // 4) 杨春生：已走完两级并按期销假（COMPLETED），对象当前在矫
+        LeaveApplication yangLv = new LeaveApplication(yang, "SICK",
+                "到县医院做术后复诊", "县人民医院",
+                now.minusSeconds(10 * 86400), now.minusSeconds(9 * 86400),
+                LeaveApplication.Status.COMPLETED, now.minusSeconds(12 * 86400));
+        yangLv.setOfficeApprovedAt(now.minusSeconds(12 * 86400 + 600));
+        yangLv.setBureauApprovedAt(now.minusSeconds(11 * 86400));
+        yangLv.setActualReturnAt(now.minusSeconds(9 * 86400 + 1800));
+        leaveRepository.save(yangLv);
+        leaveEvent(yangLv, "SUBMITTED", 0L, yang.getFullName(), "提交请假申请：术后复诊", now.minusSeconds(12 * 86400));
+        leaveEvent(yangLv, "OFFICE_APPROVED", 2L, "罗建军", "初审同意", now.minusSeconds(12 * 86400 + 600));
+        leaveEvent(yangLv, "BUREAU_APPROVED", 0L, "陈督导", "复核通过", now.minusSeconds(11 * 86400));
+        leaveEvent(yangLv, "RETURN_CHECKIN", 0L, yang.getFullName(), "复诊结束，按期销假返所",
+                now.minusSeconds(9 * 86400 + 1800));
+
+        // 5) 周文斌：司法所初审退回，等待对象修改重提（体现“退回能重提并留痕”）
+        LeaveApplication zhouLv = new LeaveApplication(zhou, "PERSONAL",
+                "想去外地打工一个月", "外省某工地",
+                now.plusSeconds(86400), now.plusSeconds(31 * 86400),
+                LeaveApplication.Status.RETURNED, now.minusSeconds(2 * 86400));
+        zhouLv.setReturnedAt(now.minusSeconds(1800));
+        leaveRepository.save(zhouLv);
+        leaveEvent(zhouLv, "SUBMITTED", 0L, zhou.getFullName(), "提交请假申请：外出务工", now.minusSeconds(2 * 86400));
+        leaveEvent(zhouLv, "OFFICE_RETURNED", 3L, "韩雪梅",
+                "请假事由与监管要求不符，且单次请假超过 30 天上限，请补充用工证明并缩短天数后重提",
+                now.minusSeconds(1800));
+
+        // 6) 孙满堂：新提交、待司法所初审（让司法所初审工作台开箱即有待办）
+        LeaveApplication sunLv = new LeaveApplication(sun, "SICK",
+                "近日反复腰痛，需到县中医院做 CT 检查并理疗", "县中医院",
+                now.plusSeconds(86400), now.plusSeconds(2 * 86400),
+                LeaveApplication.Status.PENDING_OFFICE, now.minusSeconds(6 * 3600));
+        leaveRepository.save(sunLv);
+        leaveEvent(sunLv, "SUBMITTED", 0L, sun.getFullName(), "提交请假申请：就医检查", now.minusSeconds(6 * 3600));
+
+        // ---------------- 公益活动 ----------------
+        // A) 青山·进行中（打卡窗覆盖当前）：杨春生范围内正常、陈大山范围外异常
+        PublicActivity actQs = new PublicActivity(qingshan, "青山乡河道清洁公益劳动",
+                "沿乡河道捡拾垃圾、清理淤堵，请着便服自带水杯，08:30 现场集合点名。",
+                "青山乡文化广场", qingshan.getCenterLat() + 0.0008, qingshan.getCenterLng() - 0.0006,
+                200, now.minusSeconds(3600), now.plusSeconds(2 * 3600), 20,
+                2L, "罗建军", now.minusSeconds(86400));
+        activityRepository.save(actQs);
+        ActivityEnrollment eYang = new ActivityEnrollment(actQs, yang, now.minusSeconds(80000));
+        ActivityEnrollment eChen = new ActivityEnrollment(actQs, chen, now.minusSeconds(70000));
+        enrollmentRepository.save(eYang);
+        enrollmentRepository.save(eChen);
+        // 杨春生：活动点内正常打卡
+        attendanceRepository.save(new ActivityAttendance(actQs, yang, "NORMAL",
+                now.minusSeconds(3000), now.minusSeconds(2990),
+                actQs.getLat() + 0.0002, actQs.getLng() - 0.0001, 42.0d, 200));
+        // 陈大山：偏离活动点约 1.6km，异常打卡（已在对象轨迹越界红点之外，单列活动异常）
+        attendanceRepository.save(new ActivityAttendance(actQs, chen, "ABNORMAL",
+                now.minusSeconds(1200), now.minusSeconds(1195),
+                actQs.getLat() + 0.012, actQs.getLng() + 0.009, 1620.0d, 200));
+        violationRepository.save(new ViolationEvent(chen, "ACTIVITY_ABNORMAL",
+                "对象 C-JWT26005 在公益活动「青山乡河道清洁公益劳动」打卡时定位偏离活动点 1620 米"
+                        + "（允许半径 200 米），现场打卡位置核验不通过", now.minusSeconds(1195)));
+
+        // B) 城关·未来场（报名阶段，未到打卡窗）：张伟国已报名
+        PublicActivity actCg = new PublicActivity(chengguan, "社区法治宣传志愿服务",
+                "协助司法所发放社区矫正与法治宣传册，现场设咨询台。",
+                "城关街道便民服务中心门前", chengguan.getCenterLat() + 0.001, chengguan.getCenterLng(),
+                150, now.plusSeconds(2 * 86400), now.plusSeconds(2 * 86400 + 7200), 15,
+                1L, "李建国", now.minusSeconds(3600));
+        activityRepository.save(actCg);
+        enrollmentRepository.save(new ActivityEnrollment(actCg, zhang, now.minusSeconds(1800)));
+
+        // C) 龙湖·已结束：周文斌、孙满堂正常打卡（历史完成场，FINISHED）
+        PublicActivity actLh = new PublicActivity(longhu, "龙湖镇敬老院长务公益活动",
+                "到镇敬老院帮助打扫卫生、陪伴老人。",
+                "龙湖镇敬老院", longhu.getCenterLat() - 0.001, longhu.getCenterLng() + 0.0008,
+                200, now.minusSeconds(8 * 86400), now.minusSeconds(8 * 86400 - 7200), null,
+                3L, "韩雪梅", now.minusSeconds(9 * 86400));
+        actLh.setStatus("FINISHED");
+        activityRepository.save(actLh);
+        enrollmentRepository.save(new ActivityEnrollment(actLh, zhou, now.minusSeconds(9 * 86400 + 3600)));
+        enrollmentRepository.save(new ActivityEnrollment(actLh, sun, now.minusSeconds(9 * 86400 + 3700)));
+        attendanceRepository.save(new ActivityAttendance(actLh, zhou, "NORMAL",
+                now.minusSeconds(8 * 86400 - 3600), now.minusSeconds(8 * 86400 - 3590),
+                actLh.getLat() + 0.0001, actLh.getLng(), 31.0d, 200));
+        attendanceRepository.save(new ActivityAttendance(actLh, sun, "NORMAL",
+                now.minusSeconds(8 * 86400 - 3500), now.minusSeconds(8 * 86400 - 3495),
+                actLh.getLat() - 0.0001, actLh.getLng() + 0.0001, 55.0d, 200));
+
+        // D) 伊宁·跨时区未来场（验证按所时区发布与展示）
+        PublicActivity actYn = new PublicActivity(yining, "伊宁社区环境整治公益劳动",
+                "配合社区开展巷道环境卫生整治，请注意当地集合时间。",
+                "伊宁街道社区服务中心", yining.getCenterLat() + 0.001, yining.getCenterLng(),
+                250, now.plusSeconds(3 * 86400), now.plusSeconds(3 * 86400 + 7200), 12,
+                4L, "古丽娜尔", now.minusSeconds(1800));
+        activityRepository.save(actYn);
+        enrollmentRepository.save(new ActivityEnrollment(actYn, mait, now.minusSeconds(900)));
+
+        // ---------------- 月度当面报到（本月已登记样本） ----------------
+        checkInRepository.save(inPerson(li, today.minusDays(1), 1L, "李建国"));
+        checkInRepository.save(inPerson(chen, today, 2L, "罗建军"));
+        checkInRepository.save(inPerson(xu, today.minusDays(2), 3L, "韩雪梅"));
+        checkInRepository.save(inPerson(sun, today.minusDays(3), 3L, "韩雪梅"));
+    }
+
+    private CheckIn inPerson(CorrectionObject o, LocalDate checkDate,
+                             Long staffId, String staffName) {
+        CheckIn c = new CheckIn(o, checkDate,
+                checkDate.atTime(10, 0).atZone(ZoneId.of(o.getOffice().getTimezone())).toInstant(),
+                "IN_PERSON", o.getOffice().getCenterLat(), o.getOffice().getCenterLng(), true);
+        c.setRegisteredById(staffId);
+        c.setRegisteredByName(staffName);
+        return c;
+    }
+
+    private void leaveEvent(LeaveApplication lv, String action, Long operatorId,
+                            String operatorName, String comment, Instant at) {
+        leaveEventRepository.save(new LeaveEvent(lv.getId(), action, lv.getStatus(),
+                operatorId, operatorName, comment, at));
     }
 
     private void createAccount(String username, String realName, Role role,

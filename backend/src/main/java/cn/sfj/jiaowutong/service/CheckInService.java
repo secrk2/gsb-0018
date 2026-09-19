@@ -28,13 +28,16 @@ public class CheckInService {
     private final CheckInRepository checkInRepository;
     private final CorrectionObjectRepository objectRepository;
     private final FenceService fenceService;
+    private final LeaveService leaveService;
 
     public CheckInService(CheckInRepository checkInRepository,
                           CorrectionObjectRepository objectRepository,
-                          FenceService fenceService) {
+                          FenceService fenceService,
+                          LeaveService leaveService) {
         this.checkInRepository = checkInRepository;
         this.objectRepository = objectRepository;
         this.fenceService = fenceService;
+        this.leaveService = leaveService;
     }
 
     @Transactional
@@ -63,26 +66,46 @@ public class CheckInService {
 
         ZoneId zone = FenceService.safeZone(obj.getOffice().getTimezone());
         FenceService.OfficeFences fences = fenceService.load(obj.getOffice());
-        boolean inside = fences.insideRange(lat, lng);
+        boolean geometricInside = fences.insideRange(lat, lng);
+        // 请销假联动：定位时刻处于已批准假期窗口内，围栏外报到属“准假外出”，不计异常
+        boolean onLeave = !geometricInside && leaveService.isOnAuthorizedLeaveAt(obj.getId(), fixTime);
+        boolean inside = geometricInside || onLeave;
+        boolean forbidden = fences.forbiddenAt(lat, lng, fixTime) != null;
 
         // 报到日按对象所在司法所时区确定，跨时区对象不会把 UTC 的“昨天/今天”记错
         LocalDate localDate = fixTime.atZone(zone).toLocalDate();
         boolean firstToday = !checkInRepository.existsByOffender_IdAndCheckDate(obj.getId(), localDate);
-        checkInRepository.save(new CheckIn(obj, localDate, now, "APP", lat, lng, inside));
+        CheckIn checkIn = new CheckIn(obj, localDate, now, "APP", lat, lng, inside);
+        checkIn.setLeaveAuthorized(onLeave);
+        checkInRepository.save(checkIn);
 
         // 同步更新最新位置（报到点视为一个有效实时定位）
         obj.setLastLocationAt(now);
         obj.setLastLat(lat);
         obj.setLastLng(lng);
         obj.setLastInsideFence(inside);
-        obj.setLastForbidden(fences.forbiddenAt(lat, lng, fixTime) != null);
+        obj.setLastForbidden(forbidden);
+        obj.setLastLeaveAuthorized(onLeave);
         objectRepository.save(obj);
+
+        String message;
+        if (onLeave) {
+            message = "报到成功，您处于已批准的请假外出期间，活动范围外定位不计越界；法定禁区仍不得进入";
+        } else if (forbidden) {
+            message = "报到成功，但当前定位位于禁行禁区，已立即预警司法所";
+        } else if (inside) {
+            message = "报到成功，定位在规定活动范围内";
+        } else {
+            message = "报到成功，但当前定位在电子围栏外，已提示司法所关注";
+        }
 
         return Map.of(
                 "checkedAt", now,
                 "insideFence", inside,
+                "leaveAuthorized", onLeave,
+                "forbidden", forbidden,
                 "firstToday", firstToday,
-                "message", inside ? "报到成功，定位在规定活动范围内" : "报到成功，但当前定位在电子围栏外，已提示司法所关注"
+                "message", message
         );
     }
 }

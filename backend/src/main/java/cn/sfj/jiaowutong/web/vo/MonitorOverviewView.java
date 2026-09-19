@@ -19,7 +19,7 @@ public record MonitorOverviewView(Instant generatedAt, int onlineWithinSec,
                        Instant lastPointAt, Long heartbeatAgeSec,
                        String linkState,
                        Double lat, Double lng,
-                       boolean insideRange, boolean forbidden,
+                       boolean insideRange, boolean forbidden, boolean leaveAuthorized,
                        Integer battery, Integer signal, Boolean worn,
                        long driftDiscarded24h) {
     }

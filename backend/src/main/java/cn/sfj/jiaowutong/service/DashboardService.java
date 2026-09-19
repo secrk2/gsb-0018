@@ -31,15 +31,18 @@ public class DashboardService {
     private final CorrectionObjectRepository objectRepository;
     private final CheckInRepository checkInRepository;
     private final ViolationEventRepository violationRepository;
+    private final LeaveService leaveService;
 
     public DashboardService(JudicialOfficeRepository officeRepository,
                             CorrectionObjectRepository objectRepository,
                             CheckInRepository checkInRepository,
-                            ViolationEventRepository violationRepository) {
+                            ViolationEventRepository violationRepository,
+                            LeaveService leaveService) {
         this.officeRepository = officeRepository;
         this.objectRepository = objectRepository;
         this.checkInRepository = checkInRepository;
         this.violationRepository = violationRepository;
+        this.leaveService = leaveService;
     }
 
     @Transactional(readOnly = true)
@@ -101,11 +104,16 @@ public class DashboardService {
                     intake, serving, leave, admonished, reimprisoned, released, activeTotal));
         }
 
-        // 今日应报到：在矫/请假/训诫状态，按“对象所在司法所时区的今天星期”匹配
+        // 今日应报到：在矫/请假/训诫状态，按“对象所在司法所时区的今天星期”匹配。
+        // 准假窗口内的对象（请假外出且在假期中）外出期间不要求日常报到，跳过，避免“一边批假一边催报/报红”。
+        java.util.Set<Long> awayNow = leaveService.offenderIdsOnLeaveAt(nowUtc);
         List<DashboardView.DueTodayItem> due = new ArrayList<>();
         for (CorrectionObject o : scoped) {
             if (!EnumSet.of(CorrectionStatus.SERVING, CorrectionStatus.LEAVE,
                     CorrectionStatus.ADMONISHED).contains(o.getStatus())) {
+                continue;
+            }
+            if (awayNow.contains(o.getId())) {
                 continue;
             }
             ZoneId zone = FenceService.safeZone(o.getOffice().getTimezone());

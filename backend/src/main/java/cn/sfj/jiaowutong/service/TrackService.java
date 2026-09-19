@@ -52,15 +52,18 @@ public class TrackService {
     private final CorrectionObjectRepository objectRepository;
     private final ViolationEventRepository violationRepository;
     private final FenceService fenceService;
+    private final LeaveService leaveService;
 
     public TrackService(TrackPointRepository trackPointRepository,
                         CorrectionObjectRepository objectRepository,
                         ViolationEventRepository violationRepository,
-                        FenceService fenceService) {
+                        FenceService fenceService,
+                        LeaveService leaveService) {
         this.trackPointRepository = trackPointRepository;
         this.objectRepository = objectRepository;
         this.violationRepository = violationRepository;
         this.fenceService = fenceService;
+        this.leaveService = leaveService;
     }
 
     @Transactional
@@ -77,10 +80,14 @@ public class TrackService {
         Instant futureCeil = now.plusSeconds(FUTURE_SKEW_MIN * 60);
 
         FenceService.OfficeFences fences = fenceService.load(obj.getOffice());
+        // 请销假联动：一次取出该对象全部“准假外出”窗口，逐点在内存判，避免逐点查库。
+        // 点几何上越界但采集时刻落在已批准假期 [start,end] 内 → 准假外出，不算越界红点。
+        List<LeaveApplication> awayLeaves = leaveService.loadAwayLeaves(obj.getId());
 
         int duplicates = 0;
         int outsideCount = 0;
         int forbiddenCount = 0;
+        int leaveAuthorizedCount = 0;
         List<TrackIngestView.RejectedPoint> rejected = new ArrayList<>();
 
         // 已存在的全部有效点：用于幂等、找漂移锚点、合并最新位置
@@ -147,21 +154,27 @@ public class TrackService {
                 }
             }
 
-            boolean outside;
+            boolean geometricOutside;
+            boolean leaveAuthorized = false;
             FenceService.ForbiddenHit hit;
             if (drift) {
                 // 漂移点不做围栏判定：几何结果不可信，避免误报越界/禁区
-                outside = false;
+                geometricOutside = false;
                 hit = null;
             } else {
-                outside = !fences.insideRange(p.lat(), p.lng());
+                geometricOutside = !fences.insideRange(p.lat(), p.lng());
                 hit = fences.forbiddenAt(p.lat(), p.lng(), p.pointTime());
+                // 准假外出：几何越界但定位时刻落在已批准假期窗口内（禁区不因此解禁）
+                leaveAuthorized = geometricOutside
+                        && LeaveService.withinAnyLeave(awayLeaves, p.pointTime());
             }
+            final boolean outside = geometricOutside && !leaveAuthorized;
 
             TrackPoint point = new TrackPoint(obj, p.clientPointId(), p.pointTime(),
                     p.lat(), p.lng(), p.offlineCaptured(), now,
                     outside, hit != null, p.battery(), p.signal(), p.worn(),
                     drift ? TrackPoint.IngestResult.DRIFT_DISCARDED : TrackPoint.IngestResult.ACCEPTED);
+            point.setLeaveAuthorized(leaveAuthorized);
             toSave.add(point);
 
             if (drift) {
@@ -173,6 +186,7 @@ public class TrackService {
             } else {
                 accepted++;
                 if (outside) outsideCount++;
+                if (leaveAuthorized) leaveAuthorizedCount++;
                 if (hit != null) forbiddenCount++;
                 anchor = point;
             }
@@ -196,6 +210,7 @@ public class TrackService {
             obj.setLastLng(latest.getLng());
             obj.setLastInsideFence(!latest.getOutsideFence());
             obj.setLastForbidden(Boolean.TRUE.equals(latest.getForbiddenZone()));
+            obj.setLastLeaveAuthorized(Boolean.TRUE.equals(latest.getLeaveAuthorized()));
             obj.setLastBattery(latest.getBattery());
             obj.setLastSignal(latest.getSignal());
             obj.setLastWorn(latest.getWorn());
@@ -205,7 +220,8 @@ public class TrackService {
                     || obj.getStatus() == CorrectionStatus.ADMONISHED
                     || obj.getStatus() == CorrectionStatus.LEAVE;
             if (countedStatus) {
-                // 越界红点边沿
+                // 越界红点边沿：准假外出点 outsideFence 已为 false，假期内越界天然不报警；
+                // 假期结束（逾期升训诫）后窗口外的越界点恢复报警。
                 if (latest.getOutsideFence() && !alreadyOpen(obj.getId(), "GEOFENCE_BREACH")) {
                     violationRepository.save(new ViolationEvent(obj, "GEOFENCE_BREACH",
                             "对象 " + obj.getMaskedName() + " 定位越出「" + obj.getOffice().getName()
@@ -213,12 +229,13 @@ public class TrackService {
                                     + fmtLocal(latest.getPointTime(), fences.zone()), now));
                     newBreach = true;
                 }
-                // 禁区红点边沿
+                // 禁区红点边沿：法定禁区不因请假而解禁，准假期间进入禁区照常报警
                 if (Boolean.TRUE.equals(latest.getForbiddenZone())
                         && !alreadyOpen(obj.getId(), "FORBIDDEN_ZONE")) {
                     violationRepository.save(new ViolationEvent(obj, "FORBIDDEN_ZONE",
                             "对象 " + obj.getMaskedName() + " 在禁行时段进入「" + obj.getOffice().getName()
-                                    + "」辖区禁区，最近定位时间（" + obj.getOffice().getTimezone() + "）"
+                                    + "」辖区禁区（请假外出不免禁区），最近定位时间（"
+                                    + obj.getOffice().getTimezone() + "）"
                                     + fmtLocal(latest.getPointTime(), fences.zone()), now));
                     newForbidden = true;
                 }
@@ -226,7 +243,7 @@ public class TrackService {
         }
 
         return new TrackIngestView(request.points().size(), accepted, duplicates, driftDiscarded,
-                rejected.size(), rejected, outsideCount, forbiddenCount,
+                rejected.size(), rejected, outsideCount, forbiddenCount, leaveAuthorizedCount,
                 obj.getLastLocationAt(), obj.getLastLat(), obj.getLastLng(),
                 !Boolean.FALSE.equals(obj.getLastInsideFence()),
                 Boolean.TRUE.equals(obj.getLastForbidden()),

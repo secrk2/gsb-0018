@@ -2,25 +2,27 @@
 (function (global) {
   const Views = global.Views || (global.Views = {});
 
-  // 与后端状态机保持一致的合法去向（后端为最终裁决，前端仅用于渲染按钮）
+  // 与后端状态机保持一致的合法去向（后端为最终裁决，前端仅用于渲染按钮）。
+  // 注意：进入/离开「请假外出」一律走左侧「请销假审批」两级流程（司法所初审→区局复核），
+  // 不在档案页直接一键切换，以免绕过审批与定位联动、逾期巡检；逾假训诫由系统按假期自动升级。
   const NEXT = {
     INTAKE: [{ to: 'SERVING', label: '办理入矫宣告', needReason: false }],
     SERVING: [
-      { to: 'LEAVE', label: '批准请假外出', needReason: true },
       { to: 'ADMONISHED', label: '予以训诫', needReason: true, danger: true },
       { to: 'REIMPRISONED', label: '提请收监', needReason: true, danger: true },
       { to: 'RELEASED', label: '解除矫正', needReason: true },
     ],
-    LEAVE: [
-      { to: 'SERVING', label: '销假返所', needReason: false },
-      { to: 'ADMONISHED', label: '逾假不归·训诫', needReason: true, danger: true },
-    ],
+    LEAVE: [],   // 销假/逾假训诫请在「请销假审批」办理
     ADMONISHED: [
       { to: 'SERVING', label: '教育改正·恢复在矫', needReason: false },
       { to: 'REIMPRISONED', label: '情节严重·收监', needReason: true, danger: true },
     ],
     REIMPRISONED: [],
     RELEASED: [],
+  };
+  const EMPTY_HINT = {
+    LEAVE: '对象处于「请假外出」。请在左侧「请销假审批」中办理销假返所；'
+      + '假期结束未销假的，系统会自动升为逾假违规（训诫），不在档案页直接切换。',
   };
 
   Views.detail = async function (root, id) {
@@ -84,7 +86,8 @@
                 <dt>最近定位</dt>
                 <dd>${o.lastLocationAt
                   ? `${UI.fmtTzFull(o.lastLocationAt, o.timezone)}（${UI.esc(o.timezone)}） · ` +
-                    (o.lastInsideFence ? '<span class="badge green">围栏内</span>' : '<span class="badge red">📍越界</span>')
+                    (o.lastLeaveAuthorized ? '<span class="badge LEAVE">准假外出</span>'
+                      : o.lastInsideFence ? '<span class="badge green">围栏内</span>' : '<span class="badge red">📍越界</span>')
                     + (o.lastForbidden ? ' <span class="badge red">禁区</span>' : '')
                   : '暂无'}</dd>
               </dl>
@@ -111,8 +114,8 @@
                     <button class="btn ${a.danger ? 'danger' : 'primary'} sm" data-action="${a.to}"
                       data-need-reason="${a.needReason}">${a.label}</button>`).join('')}
                 </div>` : `
-                <div class="confirm-warn">该状态为终态（${UI.STATUS_LABEL[o.status]}），
-                  状态机不允许任何回退或跳转。</div>`}
+                <div class="confirm-warn">${EMPTY_HINT[o.status]
+                  || ('该状态为终态（' + UI.STATUS_LABEL[o.status] + '），状态机不允许任何回退或跳转。')}</div>`}
               <div id="transition-result" style="margin-top:12px"></div>
             </div>
 

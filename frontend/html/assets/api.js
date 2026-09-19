@@ -70,6 +70,7 @@
 
     get(path) { return Api.request('GET', path); },
     post(path, body) { return Api.request('POST', path, body || {}); },
+    put(path, body) { return Api.request('PUT', path, body || {}); },
   };
 
   global.Api = Api;

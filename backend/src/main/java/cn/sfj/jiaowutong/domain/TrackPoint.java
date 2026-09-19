@@ -55,6 +55,13 @@ public class TrackPoint {
     @Column(name = "forbidden_zone", nullable = false)
     private Boolean forbiddenZone = false;
 
+    /**
+     * 该点虽几何上越出活动范围，但处于已批准请假单的假期时段内：
+     * 属“准假外出”，不算越界、不产生越界红点（监控轨迹以请假色单独区分）。
+     */
+    @Column(name = "leave_authorized", nullable = false)
+    private Boolean leaveAuthorized = false;
+
     /** 腕表电量百分比 0-100（无上报时为空） */
     private Integer battery;
 
@@ -114,12 +121,14 @@ public class TrackPoint {
     public Instant getReceivedAt() { return receivedAt; }
     public Boolean getOutsideFence() { return outsideFence; }
     public Boolean getForbiddenZone() { return forbiddenZone; }
+    public Boolean getLeaveAuthorized() { return leaveAuthorized; }
     public Integer getBattery() { return battery; }
     public Integer getSignal() { return signal; }
     public Boolean getWorn() { return worn; }
     public IngestResult getResult() { return result; }
 
     public void setForbiddenZone(Boolean forbiddenZone) { this.forbiddenZone = forbiddenZone; }
+    public void setLeaveAuthorized(Boolean leaveAuthorized) { this.leaveAuthorized = leaveAuthorized; }
     public void setBattery(Integer battery) { this.battery = battery; }
     public void setSignal(Integer signal) { this.signal = signal; }
     public void setWorn(Boolean worn) { this.worn = worn; }
