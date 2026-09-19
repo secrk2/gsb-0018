@@ -12,6 +12,11 @@
     MONDAY: '周一', TUESDAY: '周二', WEDNESDAY: '周三', THURSDAY: '周四',
     FRIDAY: '周五', SATURDAY: '周六', SUNDAY: '周日',
   };
+  const LEAVE_STATUS_LABEL = {
+    PENDING_OFFICE: '司法所待初审', PENDING_BUREAU: '区局待复核',
+    OFFICE_RETURNED: '司法所退回', BUREAU_RETURNED: '区局退回',
+    APPROVED: '已批准·假期中', COMPLETED: '已销假', OVERDUE: '逾假未归',
+  };
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -62,6 +67,38 @@
   function tzDate(s, tz) {
     const m = tzParts(s, tz);
     return m ? `${m.year}-${m.month}-${m.day}` : '';
+  }
+
+  // ---------- 本地墙钟（指定时区）与 UTC ISO 互转（供 datetime-local 输入） ----------
+  // 后端只收 UTC ISO；前端选择日期时间时必须按“对象所属司法所时区”解释墙钟，
+  // 不能按浏览器时区（干警可能跨时区办公）。
+  function tzOffsetMs(utcDate, tz) {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz || 'Asia/Shanghai', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const m = {};
+    dtf.formatToParts(utcDate).forEach((p) => { m[p.type] = p.value; });
+    if (m.hour === '24') m.hour = '00';
+    const asUtc = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour, +m.minute, +m.second);
+    return asUtc - utcDate.getTime();
+  }
+
+  /** datetime-local 墙钟值（yyyy-MM-ddTHH:mm，按 tz 解释）→ UTC ISO（带 Z） */
+  function wallTzToIso(wall, tz) {
+    const guess = Date.parse(wall + 'Z');
+    if (isNaN(guess)) return null;
+    // 迭代两次：用候选 UTC 时刻的本地偏移反解，避免 DST 切换日偏移取错一小时
+    let utcMs = guess - tzOffsetMs(new Date(guess), tz || 'Asia/Shanghai');
+    utcMs = guess - tzOffsetMs(new Date(utcMs), tz || 'Asia/Shanghai');
+    return new Date(utcMs).toISOString();
+  }
+
+  /** UTC ISO → datetime-local 墙钟值（yyyy-MM-ddTHH:mm，按 tz 显示） */
+  function isoToWallInput(s, tz) {
+    const m = tzParts(s, tz);
+    return m ? `${m.year}-${m.month}-${m.day}T${m.hour}:${m.minute}` : '';
   }
   /** 心跳年龄（秒）→ 中文年龄文案 */
   function fmtAge(sec) {
@@ -158,6 +195,7 @@
   global.UI = {
     esc, statusBadge, fmtDateTime, toast, confirmModal, alertModal,
     fmtTz, fmtTzFull, fmtTzClock, tzDate, fmtAge, tzParts,
+    wallTzToIso, isoToWallInput,
     statusIcon: (s) => STATUS_ICON[s] || '',
     STATUS_LABEL, STATUS_ICON, WEEK_LABEL,
   };

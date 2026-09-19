@@ -6,7 +6,6 @@
   const NEXT = {
     INTAKE: [{ to: 'SERVING', label: '办理入矫宣告', needReason: false }],
     SERVING: [
-      { to: 'LEAVE', label: '批准请假外出', needReason: true },
       { to: 'ADMONISHED', label: '予以训诫', needReason: true, danger: true },
       { to: 'REIMPRISONED', label: '提请收监', needReason: true, danger: true },
       { to: 'RELEASED', label: '解除矫正', needReason: true },
@@ -103,6 +102,10 @@
             <div class="card">
               <div class="card-title">🔄 状态流转</div>
               ${actions.length ? `
+                ${o.status === 'SERVING' ? `
+                <div class="confirm-warn" style="margin-bottom:8px">
+                  请假外出须走「<a href="#/leaves" style="color:var(--brand-600)">请销假两级审批</a>」
+                  （对象手机申请 → 司法所初审 → 区局复核），不能手工直接切换。</div>` : ''}
                 <div style="font-size:13px;color:var(--ink-secondary);margin-bottom:6px">
                   当前「${UI.STATUS_LABEL[o.status]}」，可执行：
                 </div>

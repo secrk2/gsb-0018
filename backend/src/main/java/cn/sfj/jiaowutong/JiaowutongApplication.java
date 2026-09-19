@@ -2,10 +2,12 @@ package cn.sfj.jiaowutong;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.util.TimeZone;
 
 @SpringBootApplication
+@EnableScheduling
 public class JiaowutongApplication {
     public static void main(String[] args) {
         // 存储与传输一律 UTC；默认时区固定 UTC，避免容器 TZ 污染“今天/星期几”判定，

@@ -23,6 +23,8 @@ public class ObjectService {
     private final ViolationEventRepository violationRepository;
     private final TrackPointRepository trackPointRepository;
     private final CheckInRepository checkInRepository;
+    private final LeaveRequestRepository leaveRequestRepository;
+    private final LeaveRequestLogRepository leaveLogRepository;
     private final AccessControlService accessControl;
 
     public ObjectService(CorrectionObjectRepository objectRepository,
@@ -31,6 +33,8 @@ public class ObjectService {
                          ViolationEventRepository violationRepository,
                          TrackPointRepository trackPointRepository,
                          CheckInRepository checkInRepository,
+                         LeaveRequestRepository leaveRequestRepository,
+                         LeaveRequestLogRepository leaveLogRepository,
                          AccessControlService accessControl) {
         this.objectRepository = objectRepository;
         this.transitionRepository = transitionRepository;
@@ -38,6 +42,8 @@ public class ObjectService {
         this.violationRepository = violationRepository;
         this.trackPointRepository = trackPointRepository;
         this.checkInRepository = checkInRepository;
+        this.leaveRequestRepository = leaveRequestRepository;
+        this.leaveLogRepository = leaveLogRepository;
         this.accessControl = accessControl;
     }
 
@@ -110,12 +116,45 @@ public class ObjectService {
         accessControl.assertStaffOrSupervisor(user);
         CorrectionObject o = accessControl.loadVisible(id, user);
         CorrectionStatus from = o.getStatus();
+
+        // 进入/离开“请假外出”必须走请销假两级审批流程，不能用通用状态按钮直接切换，
+        // 否则会绕过司法所初审 + 区局复核以及定位联动（假期消警/逾期升级）
+        if (target == CorrectionStatus.LEAVE) {
+            throw ApiException.badRequest("LEAVE_FLOW_REQUIRED",
+                    "进入「请假外出」必须通过请销假模块：由对象手机端发起申请，经司法所初审、区局复核通过后自动生效，不能手工直接切换状态");
+        }
+
         CorrectionStateMachine.assertTransition(from, target);
 
         o.setStatus(target);
         objectRepository.save(o);
         transitionRepository.save(new StatusTransition(
                 id, from, target, user.userId(), user.realName(), reason));
+
+        // 手工“销假返所/逾假训诫”时联动关闭仍在假期中的请假单，避免单据与档案状态长期不一致
+        if (from == CorrectionStatus.LEAVE) {
+            leaveRequestRepository
+                    .findByOffender_IdAndStatus(id, cn.sfj.jiaowutong.domain.LeaveStatus.APPROVED)
+                    .forEach(lr -> {
+                        if (target == CorrectionStatus.SERVING) {
+                            lr.setStatus(cn.sfj.jiaowutong.domain.LeaveStatus.COMPLETED);
+                            lr.setReturnedAt(java.time.Instant.now());
+                            lr.setReturnNote("干警在档案中直接办理销假返所：" + reason);
+                            leaveRequestRepository.save(lr);
+                            leaveLogRepository.save(new LeaveRequestLog(lr.getId(), "RETURN",
+                                    cn.sfj.jiaowutong.domain.LeaveStatus.COMPLETED, lr.getRevision(),
+                                    user.userId(), user.realName(), "干警在档案中直接办理销假返所", null));
+                        } else if (target == CorrectionStatus.ADMONISHED) {
+                            lr.setStatus(cn.sfj.jiaowutong.domain.LeaveStatus.OVERDUE);
+                            lr.setOverdueAt(java.time.Instant.now());
+                            leaveRequestRepository.save(lr);
+                            leaveLogRepository.save(new LeaveRequestLog(lr.getId(), "OVERDUE",
+                                    cn.sfj.jiaowutong.domain.LeaveStatus.OVERDUE, lr.getRevision(),
+                                    user.userId(), user.realName(),
+                                    "干警在档案中直接以逾假未归予以训诫：" + reason, null));
+                        }
+                    });
+        }
 
         // 训诫本身是处置措施，同步生成一条违规处置红点
         if (target == CorrectionStatus.ADMONISHED) {
@@ -164,6 +203,7 @@ public class ObjectService {
             case "FORBIDDEN_ZONE" -> "禁区闯入";
             case "ABSENT" -> "未按日报到";
             case "ADMONISH" -> "训诫";
+            case "LEAVE_OVERDUE" -> "逾假未归";
             default -> type;
         };
     }

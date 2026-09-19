@@ -7,6 +7,13 @@
   let fixTimer = null;
   let detail = null;
 
+  // 供请假/活动模块读取当前定位与最新详情（打卡必须复用“当前定位”，不能用旧坐标）
+  global.OffenderFix = {
+    get: () => currentFix,
+    detail: () => detail,
+    set: (f) => { currentFix = f; },
+  };
+
   Views.offender = async function (root) {
     // 离开后再进入：停掉旧视图的定时器，避免后台继续采集
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
@@ -87,6 +94,16 @@
             <button class="btn sm danger" id="btn-simoff">模拟断网：关</button>
           </div>
           <div class="queue-state" id="sync-result"></div>
+        </div>
+
+        <div class="phone-card">
+          <h3>📝 请销假</h3>
+          <div id="my-leave-slot"><div class="skeleton">加载中…</div></div>
+        </div>
+
+        <div class="phone-card">
+          <h3>🤝 公益活动</h3>
+          <div id="my-activity-slot"><div class="skeleton">加载中…</div></div>
         </div>
 
         <div class="phone-card">
@@ -316,6 +333,10 @@
     }
     TrackQueue.setViewListener(renderQueue);
     renderQueue(TrackQueue.snapshot());
+
+    // 请销假 / 公益活动手机端模块（读取上面的当前定位 currentFix）
+    if (global.OffenderLeave) global.OffenderLeave.mount(root, o);
+    if (global.OffenderActivity) global.OffenderActivity.mount(root, o);
   };
 
   // 采集点优先用当前有效定位（加微小漂移），否则按围栏内随机点

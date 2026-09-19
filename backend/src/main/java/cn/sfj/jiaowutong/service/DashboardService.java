@@ -31,15 +31,18 @@ public class DashboardService {
     private final CorrectionObjectRepository objectRepository;
     private final CheckInRepository checkInRepository;
     private final ViolationEventRepository violationRepository;
+    private final LeaveService leaveService;
 
     public DashboardService(JudicialOfficeRepository officeRepository,
                             CorrectionObjectRepository objectRepository,
                             CheckInRepository checkInRepository,
-                            ViolationEventRepository violationRepository) {
+                            ViolationEventRepository violationRepository,
+                            LeaveService leaveService) {
         this.officeRepository = officeRepository;
         this.objectRepository = objectRepository;
         this.checkInRepository = checkInRepository;
         this.violationRepository = violationRepository;
+        this.leaveService = leaveService;
     }
 
     @Transactional(readOnly = true)
@@ -112,6 +115,11 @@ public class DashboardService {
             ZonedDateTime localNow = nowUtc.atZone(zone);
             LocalDate localToday = localNow.toLocalDate();
             if (!localNow.getDayOfWeek().toString().equals(o.getReportDay())) {
+                continue;
+            }
+            // 请销假联动：当前处于已批准假期窗口内的对象免予日常报到（其定位在假期内合法离所，
+            // 既不应判越界，也不应产生“今日未报到”红点），逾假未归被转训诫后本豁免自动失效。
+            if (leaveService.withinApprovedLeave(o.getId(), nowUtc)) {
                 continue;
             }
             boolean checked = checkInRepository.existsByOffender_IdAndCheckDate(o.getId(), localToday);

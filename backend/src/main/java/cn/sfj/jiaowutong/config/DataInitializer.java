@@ -47,6 +47,12 @@ public class DataInitializer implements ApplicationRunner {
     private final GeoFenceRepository fenceRepository;
     private final FenceScheduleRepository scheduleRepository;
     private final MonitorActionRepository monitorActionRepository;
+    private final LeaveRequestRepository leaveRepository;
+    private final LeaveRequestLogRepository leaveLogRepository;
+    private final PublicActivityRepository activityRepository;
+    private final ActivitySignupRepository signupRepository;
+    private final ActivityCheckInRepository activityCheckInRepository;
+    private final MonthlyReportRepository monthlyReportRepository;
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
 
@@ -60,6 +66,12 @@ public class DataInitializer implements ApplicationRunner {
                            GeoFenceRepository fenceRepository,
                            FenceScheduleRepository scheduleRepository,
                            MonitorActionRepository monitorActionRepository,
+                           LeaveRequestRepository leaveRepository,
+                           LeaveRequestLogRepository leaveLogRepository,
+                           PublicActivityRepository activityRepository,
+                           ActivitySignupRepository signupRepository,
+                           ActivityCheckInRepository activityCheckInRepository,
+                           MonthlyReportRepository monthlyReportRepository,
                            PasswordEncoder passwordEncoder,
                            ObjectMapper objectMapper) {
         this.officeRepository = officeRepository;
@@ -72,6 +84,12 @@ public class DataInitializer implements ApplicationRunner {
         this.fenceRepository = fenceRepository;
         this.scheduleRepository = scheduleRepository;
         this.monitorActionRepository = monitorActionRepository;
+        this.leaveRepository = leaveRepository;
+        this.leaveLogRepository = leaveLogRepository;
+        this.activityRepository = activityRepository;
+        this.signupRepository = signupRepository;
+        this.activityCheckInRepository = activityCheckInRepository;
+        this.monthlyReportRepository = monthlyReportRepository;
         this.passwordEncoder = passwordEncoder;
         this.objectMapper = objectMapper;
     }
@@ -285,12 +303,12 @@ public class DataInitializer implements ApplicationRunner {
                 "对象 L-JWT26003 因本周两次未按规定时间报到，被予以训诫",
                 today.minusDays(1).atTime(15, 30).atZone(SH).toInstant()));
 
-        // ---------- 账号 ----------
-        createAccount("jiandu", "陈督导", Role.SUPERVISOR, null, null);
-        createAccount("gancheng", "李建国", Role.STAFF, chengguan, null);
-        createAccount("ganqingshan", "罗建军", Role.STAFF, qingshan, null);
-        createAccount("ganlonghu", "韩雪梅", Role.STAFF, longhu, null);
-        createAccount("ganyining", "古丽娜尔", Role.STAFF, yining, null);
+        // ---------- 账号（先建账号，便于下方业务种子引用真实操作人 id） ----------
+        UserAccount jiandu = createAccount("jiandu", "陈督导", Role.SUPERVISOR, null, null);
+        UserAccount gancheng = createAccount("gancheng", "李建国", Role.STAFF, chengguan, null);
+        UserAccount ganqingshan = createAccount("ganqingshan", "罗建军", Role.STAFF, qingshan, null);
+        UserAccount ganlonghu = createAccount("ganlonghu", "韩雪梅", Role.STAFF, longhu, null);
+        UserAccount ganyining = createAccount("ganyining", "古丽娜尔", Role.STAFF, yining, null);
 
         String[] objUsers = {"obj1", "obj2", "obj3", null, "obj4", "obj5", null, null,
                 "obj6", "obj7", "obj8", "obj9", "obj10"};
@@ -301,7 +319,16 @@ public class DataInitializer implements ApplicationRunner {
             }
         }
 
-        log.info("种子数据完成：4 个司法所（含跨时区伊宁所）、13 名对象、多边形活动范围 4 个、禁区 5 个、5 秒粒度轨迹与双口径样本");
+        // ---------- 请销假种子（两级审批 / 退回重提 / 逾假未归） ----------
+        seedLeaves(objs, now, gancheng, ganqingshan, ganlonghu, ganyining, jiandu);
+
+        // ---------- 公益活动种子（报名 / 正常打卡 / 位置异常打卡） ----------
+        seedActivities(objs, now, qingshan, chengguan, longhu);
+
+        // ---------- 月度报到种子（本月 + 上月，批量花名册可显示“已完成/未完成”） ----------
+        seedMonthlyReports(objs, today, gancheng, ganqingshan, ganlonghu, ganyining);
+
+        log.info("种子数据完成：4 个司法所（含跨时区伊宁所）、13 名对象、多边形活动范围 4 个、禁区 5 个、5 秒粒度轨迹与双口径样本、请销假/公益活动/月度报到样本");
     }
 
     /** 近 n 个 5 秒点围绕所中心游走；specialTail=1 时最后一点落入龙湖废弃码头 */
@@ -412,7 +439,7 @@ public class DataInitializer implements ApplicationRunner {
         }
     }
 
-    private void createAccount(String username, String realName, Role role,
+    private UserAccount createAccount(String username, String realName, Role role,
                                JudicialOffice office, CorrectionObject linked) {
         String[] saltHash = passwordEncoder.newSaltAndHash("123456");
         UserAccount u = new UserAccount();
@@ -424,7 +451,279 @@ public class DataInitializer implements ApplicationRunner {
         u.setPasswordSalt(saltHash[0]);
         u.setPasswordHash(saltHash[1]);
         u.setEnabled(true);
-        userRepository.save(u);
+        return userRepository.save(u);
+    }
+
+    // ---------------- 请销假 / 公益活动 / 月度报到 种子 ----------------
+
+    /**
+     * 请销假样本，覆盖两级审批各环节：
+     * 待初审、待区局复核、司法所退回、区局退回重提（两轮留痕）、已批准假期中、已销假、逾假未归（自动转训诫）。
+     */
+    private void seedLeaves(List<CorrectionObject> objs, Instant now,
+                            UserAccount gancheng, UserAccount ganqingshan,
+                            UserAccount ganlonghu, UserAccount ganyining, UserAccount jiandu) {
+        CorrectionObject wang = objs.get(1);    // 城关·王秀兰（原 LEAVE）→ 逾假未归
+        CorrectionObject chen = objs.get(4);    // 青山·陈大山 → 待区局复核
+        CorrectionObject yang = objs.get(5);    // 青山·杨春生 → 区局退回（第二轮）
+        CorrectionObject zhou = objs.get(8);    // 龙湖·周文斌 → 司法所退回
+        CorrectionObject wu = objs.get(9);      // 龙湖·吴桂芳（LEAVE）→ 已批准假期中
+        CorrectionObject sun = objs.get(11);    // 龙湖·孙满堂 → 已销假历史单
+        CorrectionObject mait = objs.get(12);   // 伊宁·买买提 → 待司法所初审
+
+        // 吴桂芳：已批准、假期进行中（昨天开始，两天后结束）
+        LeaveRequest wuLeave = persistLeave(wu, "县人民医院", "陪护住院手术的家属，需赴县医院照护",
+                now.minusSeconds(86400L / 2), now.plusSeconds(2 * 86400L),
+                LeaveStatus.APPROVED, 1, now.minusSeconds(3 * 86400L));
+        wuLeave.setOfficeApprovedAt(now.minusSeconds(2 * 86400L));
+        wuLeave.setBureauApprovedAt(now.minusSeconds(86400L));
+        leaveRepository.save(wuLeave);
+        leaveLog(wuLeave, "SUBMIT", wuLeave.getStatus(), wu.getId(), wu.getFullName(), "对象提交请假申请", wuLeave);
+        leaveLog(wuLeave, "OFFICE_APPROVE", wuLeave.getStatus(), ganlonghu.getId(), ganlonghu.getRealName(),
+                "司法所初审同意，情况属实，报区局复核", null);
+        leaveLog(wuLeave, "BUREAU_APPROVE", wuLeave.getStatus(), jiandu.getId(), jiandu.getRealName(),
+                "区局复核同意，予以准假；假期内越界不报警，已联动核销红点", null);
+
+        // 王秀兰：假期 3 天前结束仍未销假 → 逾假未归，档案转训诫（与定时任务自动处置同构）
+        LeaveRequest wangLeave = persistLeave(wang, "外省老家", "家中长辈丧事需返乡处理",
+                now.minusSeconds(6 * 86400L), now.minusSeconds(3 * 86400L),
+                LeaveStatus.OVERDUE, 1, now.minusSeconds(8 * 86400L));
+        wangLeave.setOfficeApprovedAt(now.minusSeconds(8 * 86400L + 3600));
+        wangLeave.setBureauApprovedAt(now.minusSeconds(7 * 86400L));
+        wangLeave.setOverdueAt(now.minusSeconds(3 * 86400L));
+        leaveRepository.save(wangLeave);
+        leaveLog(wangLeave, "SUBMIT", wangLeave.getStatus(), wang.getId(), wang.getFullName(), "对象提交请假申请", wangLeave);
+        leaveLog(wangLeave, "OFFICE_APPROVE", wangLeave.getStatus(), gancheng.getId(), gancheng.getRealName(), "司法所初审同意，报区局复核", null);
+        leaveLog(wangLeave, "BUREAU_APPROVE", wangLeave.getStatus(), jiandu.getId(), jiandu.getRealName(), "区局复核同意，予以准假", null);
+        leaveLog(wangLeave, "OVERDUE", wangLeave.getStatus(), 0L, "系统（定时任务）",
+                "假期届满未销假，自动升为违规并转训诫", (LeaveRequest) null);
+        wang.setStatus(CorrectionStatus.ADMONISHED);
+        objectRepository.save(wang);
+        transitionRepository.save(new StatusTransition(wang.getId(),
+                CorrectionStatus.LEAVE, CorrectionStatus.ADMONISHED, 0L,
+                "系统（逾假未归自动处置）", "假期届满未销假，系统自动转训诫"));
+        violationRepository.save(new ViolationEvent(wang, "LEAVE_OVERDUE",
+                "对象 W-JWT26002 请假假期已于 " + wangLeave.getEndAt()
+                        + " 届满，至今未销假返所，系统自动登记为逾假未归违规并转训诫",
+                now.minusSeconds(3 * 86400L)));
+
+        // 陈大山：司法所已初审通过，等待区局复核
+        LeaveRequest chenLeave = persistLeave(chen, "县城", "随工队赴县城参加集中技能培训",
+                now.plusSeconds(2 * 86400L), now.plusSeconds(3 * 86400L),
+                LeaveStatus.PENDING_BUREAU, 1, now.minusSeconds(5 * 3600L));
+        chenLeave.setOfficeApprovedAt(now.minusSeconds(2 * 3600L));
+        leaveRepository.save(chenLeave);
+        leaveLog(chenLeave, "SUBMIT", LeaveStatus.PENDING_OFFICE, chen.getId(), chen.getFullName(),
+                "对象提交请假申请", chenLeave);
+        leaveLog(chenLeave, "OFFICE_APPROVE", LeaveStatus.PENDING_BUREAU,
+                ganqingshan.getId(), ganqingshan.getRealName(),
+                "司法所初审同意，培训通知已核验，报区局复核", null);
+
+        // 杨春生：两轮审批——第一轮被司法所退回、重提后区局复核再次退回，等待第二次修改重提
+        LeaveRequest yangLeave = persistLeave(yang, "邻县", "拟赴邻县探望务工的配偶（区局复核退回后已补材料）",
+                now.plusSeconds(4 * 86400L), now.plusSeconds(5 * 86400L),
+                LeaveStatus.BUREAU_RETURNED, 2, now.minusSeconds(6 * 3600L));
+        yangLeave.setOfficeApprovedAt(now.minusSeconds(2 * 3600L));
+        leaveRepository.save(yangLeave);
+        leaveLog(yangLeave, "SUBMIT", LeaveStatus.PENDING_OFFICE, yang.getId(), yang.getFullName(),
+                "对象提交请假申请", rawSnapshot("邻县", "想去邻县打工几天",
+                        now.plusSeconds(3 * 86400L), now.plusSeconds(6 * 86400L)));
+        leaveLog(yangLeave, "OFFICE_RETURN", LeaveStatus.OFFICE_RETURNED,
+                ganqingshan.getId(), ganqingshan.getRealName(),
+                "司法所退回：事由不充分，请补充外出具体事由与证明材料", rawSnapshot(
+                        "邻县", "想去邻县打工几天",
+                        now.plusSeconds(3 * 86400L), now.plusSeconds(6 * 86400L)));
+        leaveLog(yangLeave, "RESUBMIT", LeaveStatus.PENDING_OFFICE, yang.getId(), yang.getFullName(),
+                "对象按退回意见补充亲属关系证明后第 2 次重新提交", yangLeave);
+        leaveLog(yangLeave, "OFFICE_APPROVE", LeaveStatus.PENDING_BUREAU,
+                ganqingshan.getId(), ganqingshan.getRealName(),
+                "司法所初审同意（第 2 轮），材料已补齐，报区局复核", null);
+        leaveLog(yangLeave, "BUREAU_RETURN", LeaveStatus.BUREAU_RETURNED,
+                jiandu.getId(), jiandu.getRealName(),
+                "区局退回：请假时间与在矫教育学习安排冲突，请调整为下周三之后再提交", null);
+
+        // 周文斌：司法所初审直接退回，等待修改重提
+        LeaveRequest zhouLeave = persistLeave(zhou, "市区", "想到市区找朋友",
+                now.plusSeconds(86400L), now.plusSeconds(2 * 86400L),
+                LeaveStatus.OFFICE_RETURNED, 1, now.minusSeconds(26 * 3600L));
+        leaveRepository.save(zhouLeave);
+        leaveLog(zhouLeave, "SUBMIT", LeaveStatus.PENDING_OFFICE, zhou.getId(), zhou.getFullName(),
+                "对象提交请假申请", zhouLeave);
+        leaveLog(zhouLeave, "OFFICE_RETURN", LeaveStatus.OFFICE_RETURNED,
+                ganlonghu.getId(), ganlonghu.getRealName(),
+                "司法所退回：目的地与事由均不明确，须写明具体去处、同行人与返回时间", null);
+
+        // 买买提：刚提交，司法所待初审（跨时区所）
+        LeaveRequest maitLeave = persistLeave(mait, "伊宁市开发区", "按司法所安排赴开发区参加集中就业洽谈",
+                now.plusSeconds(3 * 86400L), now.plusSeconds(3 * 86400L + 6 * 3600L),
+                LeaveStatus.PENDING_OFFICE, 1, now.minusSeconds(40 * 3600L));
+        leaveRepository.save(maitLeave);
+        leaveLog(maitLeave, "SUBMIT", LeaveStatus.PENDING_OFFICE, mait.getId(), mait.getFullName(),
+                "对象提交请假申请", maitLeave);
+
+        // 孙满堂：上个月一次完整的已销假假期
+        LeaveRequest sunLeave = persistLeave(sun, "县医院", "复诊取药",
+                now.minusSeconds(20 * 86400L), now.minusSeconds(19 * 86400L),
+                LeaveStatus.COMPLETED, 1, now.minusSeconds(22 * 86400L));
+        sunLeave.setOfficeApprovedAt(now.minusSeconds(21 * 86400L));
+        sunLeave.setBureauApprovedAt(now.minusSeconds(20 * 86400L + 3600));
+        sunLeave.setReturnedAt(now.minusSeconds(19 * 86400L + 1800));
+        sunLeave.setReturnNote("按期返所，复诊病历已交司法所备案");
+        leaveRepository.save(sunLeave);
+        leaveLog(sunLeave, "SUBMIT", LeaveStatus.PENDING_OFFICE, sun.getId(), sun.getFullName(),
+                "对象提交请假申请", sunLeave);
+        leaveLog(sunLeave, "OFFICE_APPROVE", LeaveStatus.PENDING_BUREAU,
+                ganlonghu.getId(), ganlonghu.getRealName(), "司法所初审同意，报区局复核", null);
+        leaveLog(sunLeave, "BUREAU_APPROVE", LeaveStatus.APPROVED,
+                jiandu.getId(), jiandu.getRealName(), "区局复核同意，予以准假半天", null);
+        leaveLog(sunLeave, "RETURN", LeaveStatus.COMPLETED,
+                sun.getId(), sun.getFullName(), "对象按期销假返所：复诊病历已交司法所备案", null);
+    }
+
+    /** 城关所干警账号已先行创建 */
+
+    private LeaveRequest persistLeave(CorrectionObject o, String dest, String reason,
+                                      Instant startAt, Instant endAt, LeaveStatus status,
+                                      int revision, Instant submittedAt) {
+        LeaveRequest lr = new LeaveRequest();
+        lr.setOffender(o);
+        lr.setDestination(dest);
+        lr.setReason(reason);
+        lr.setStartAt(startAt);
+        lr.setEndAt(endAt);
+        lr.setStatus(status);
+        lr.setRevision(revision);
+        lr.setSubmittedAt(submittedAt);
+        return leaveRepository.save(lr);
+    }
+
+    private String rawSnapshot(String dest, String reason, Instant startAt, Instant endAt) {
+        try {
+            return objectMapper.writeValueAsString(java.util.Map.of(
+                    "destination", dest, "reason", reason,
+                    "startAt", startAt.toString(), "endAt", endAt.toString()));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void leaveLog(LeaveRequest lr, String action, LeaveStatus resultStatus,
+                          Long operatorId, String operatorName, String comment, Object snapshotOrSource) {
+        String snapshot = null;
+        if (snapshotOrSource instanceof LeaveRequest src) {
+            snapshot = rawSnapshot(src.getDestination(), src.getReason(), src.getStartAt(), src.getEndAt());
+        } else if (snapshotOrSource instanceof String s) {
+            snapshot = s;
+        }
+        leaveLogRepository.save(new LeaveRequestLog(lr.getId(), action, resultStatus,
+                lr.getRevision(), operatorId, operatorName, comment, snapshot));
+    }
+
+    /** 公益活动样本：未开始（可报名）、进行中（可现场打卡）、已结束（含正常+异常打卡花名册）。 */
+    private void seedActivities(List<CorrectionObject> objs, Instant now,
+                                JudicialOffice qingshan, JudicialOffice chengguan, JudicialOffice longhu) {
+        CorrectionObject chen = objs.get(4);
+        CorrectionObject yang = objs.get(5);
+        CorrectionObject zhou = objs.get(8);
+        CorrectionObject wu = objs.get(9);
+        CorrectionObject sun = objs.get(11);
+
+        // 进行中：青山乡敬老院慰问（打卡通道开放），陈大山已在现场正常打卡
+        PublicActivity caring = newActivity("青山乡敬老院慰问志愿服务",
+                "陪同敬老院老人打扫卫生、表演节目，现场签到打卡",
+                qingshan, "青山乡中心敬老院",
+                qingshan.getCenterLat() + 0.0010, qingshan.getCenterLng() - 0.0008, 200,
+                now.minusSeconds(40 * 60), now.plusSeconds(2 * 3600), now.minusSeconds(86400L), 30);
+        signupRepository.save(new ActivitySignup(caring, chen, "准时参加"));
+        signupRepository.save(new ActivitySignup(caring, yang, ""));
+        activityCheckInRepository.save(new ActivityCheckIn(caring, chen, ActivityCheckIn.Result.NORMAL,
+                now.minusSeconds(20 * 60),
+                caring.getLat() + 0.00002, caring.getLng() - 0.00001, 6.3));
+
+        // 未开始：青山乡河道清理（手机端可报名）
+        newActivity("青山乡河道垃圾清理公益劳动",
+                "沿乡河道捡拾垃圾、清理淤积物，请着劳动服装，现场打卡考勤",
+                qingshan, "青山乡东河桥集合点",
+                qingshan.getCenterLat() + 0.0022, qingshan.getCenterLng() + 0.0015, 200,
+                now.plusSeconds(2 * 86400L), now.plusSeconds(2 * 86400L + 3 * 3600L),
+                now.plusSeconds(86400L), 20);
+
+        // 未开始：城关社区法治宣传
+        newActivity("城关社区法治宣传日",
+                "协助司法所发放社区矫正法宣传册，现场答疑维持秩序",
+                chengguan, "城关街道文化广场",
+                chengguan.getCenterLat() - 0.0010, chengguan.getCenterLng() + 0.0012, 300,
+                now.plusSeconds(3 * 86400L), now.plusSeconds(3 * 86400L + 4 * 3600L),
+                now.plusSeconds(2 * 86400L), 50);
+
+        // 已结束：龙湖镇公园清扫——周文斌/孙满堂正常打卡，吴桂芳在范围外打卡被标异常
+        PublicActivity cleanup = newActivity("龙湖镇滨河公园清扫",
+                "清扫滨河公园步道与绿化带",
+                longhu, "龙湖镇滨河公园南门",
+                longhu.getCenterLat() + 0.0008, longhu.getCenterLng() - 0.0006, 150,
+                now.minusSeconds(10 * 86400L), now.minusSeconds(10 * 86400L + 3 * 3600L),
+                now.minusSeconds(11 * 86400L), 25);
+        signupRepository.save(new ActivitySignup(cleanup, zhou, ""));
+        signupRepository.save(new ActivitySignup(cleanup, sun, ""));
+        signupRepository.save(new ActivitySignup(cleanup, wu, "身体不适可能晚到"));
+        activityCheckInRepository.save(new ActivityCheckIn(cleanup, zhou, ActivityCheckIn.Result.NORMAL,
+                now.minusSeconds(10 * 86400L + 5 * 60),
+                cleanup.getLat(), cleanup.getLng() + 0.00003, 3.1));
+        activityCheckInRepository.save(new ActivityCheckIn(cleanup, sun, ActivityCheckIn.Result.NORMAL,
+                now.minusSeconds(10 * 86400L + 8 * 60),
+                cleanup.getLat() - 0.00002, cleanup.getLng(), 2.4));
+        // 异常：定位距活动点约 2.1km，不在 150m 半径内，标记 ABNORMAL 留痕
+        activityCheckInRepository.save(new ActivityCheckIn(cleanup, wu, ActivityCheckIn.Result.ABNORMAL,
+                now.minusSeconds(10 * 86400L + 12 * 60),
+                cleanup.getLat() + 0.019, cleanup.getLng() + 0.005, 2120.0));
+    }
+
+    private PublicActivity newActivity(String title, String desc, JudicialOffice office,
+                                       String locationName, double lat, double lng, int radius,
+                                       Instant startAt, Instant endAt, Instant deadline, Integer capacity) {
+        PublicActivity a = new PublicActivity();
+        a.setTitle(title);
+        a.setDescription(desc);
+        a.setOffice(office);
+        a.setLocationName(locationName);
+        a.setLat(lat);
+        a.setLng(lng);
+        a.setRadiusMeters(radius);
+        a.setStartAt(startAt);
+        a.setEndAt(endAt);
+        a.setSignupDeadline(deadline);
+        a.setCapacity(capacity);
+        a.setEnabled(true);
+        return activityRepository.save(a);
+    }
+
+    /** 月度报到：本月部分对象已批量登记，上月花名册多人已完成。 */
+    private void seedMonthlyReports(List<CorrectionObject> objs, LocalDate today,
+                                    UserAccount gancheng, UserAccount ganqingshan,
+                                    UserAccount ganlonghu, UserAccount ganyining) {
+        java.time.YearMonth thisMonth = java.time.YearMonth.from(today);
+        LocalDate m0 = thisMonth.atDay(1);
+        LocalDate m1 = thisMonth.minusMonths(1).atDay(1);
+
+        // 本月已完成：陈大山、杨春生（青山所批量登记）、买买提（伊宁所）
+        monthlyReportRepository.save(new MonthlyReport(objs.get(4), m0,
+                ganqingshan.getId(), ganqingshan.getRealName(), "BATCH", "本月集中点验，按月度报到花名册批量登记"));
+        monthlyReportRepository.save(new MonthlyReport(objs.get(5), m0,
+                ganqingshan.getId(), ganqingshan.getRealName(), "BATCH", "本月集中点验，按月度报到花名册批量登记"));
+        monthlyReportRepository.save(new MonthlyReport(objs.get(12), m0,
+                ganyining.getId(), ganyining.getRealName(), "SINGLE", "当面月度报到"));
+
+        // 上月已完成多人
+        monthlyReportRepository.save(new MonthlyReport(objs.get(0), m1, gancheng.getId(),
+                gancheng.getRealName(), "BATCH", "上月月度点验"));
+        monthlyReportRepository.save(new MonthlyReport(objs.get(4), m1, ganqingshan.getId(),
+                ganqingshan.getRealName(), "BATCH", "上月月度点验"));
+        monthlyReportRepository.save(new MonthlyReport(objs.get(5), m1, ganqingshan.getId(),
+                ganqingshan.getRealName(), "BATCH", "上月月度点验"));
+        monthlyReportRepository.save(new MonthlyReport(objs.get(8), m1, ganlonghu.getId(),
+                ganlonghu.getRealName(), "BATCH", "上月月度点验"));
+        monthlyReportRepository.save(new MonthlyReport(objs.get(12), m1, ganyining.getId(),
+                ganyining.getRealName(), "SINGLE", "上月当面月度报到"));
     }
 
     private record SeedObj(String no, String fullName, JudicialOffice office,

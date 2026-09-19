@@ -52,15 +52,18 @@ public class TrackService {
     private final CorrectionObjectRepository objectRepository;
     private final ViolationEventRepository violationRepository;
     private final FenceService fenceService;
+    private final LeaveService leaveService;
 
     public TrackService(TrackPointRepository trackPointRepository,
                         CorrectionObjectRepository objectRepository,
                         ViolationEventRepository violationRepository,
-                        FenceService fenceService) {
+                        FenceService fenceService,
+                        LeaveService leaveService) {
         this.trackPointRepository = trackPointRepository;
         this.objectRepository = objectRepository;
         this.violationRepository = violationRepository;
         this.fenceService = fenceService;
+        this.leaveService = leaveService;
     }
 
     @Transactional
@@ -205,8 +208,13 @@ public class TrackService {
                     || obj.getStatus() == CorrectionStatus.ADMONISHED
                     || obj.getStatus() == CorrectionStatus.LEAVE;
             if (countedStatus) {
+                // 与请销假联动：已批准假期窗口 [startAt,endAt) 内越过活动围栏/进入禁区不算越界、
+                // 不产生红点（批假即视为允许离开规定活动范围）；假期结束未销假被自动转训诫后，
+                // 不再存在 APPROVED 单据，越界报警自动恢复——不会“一边批着假一边报着警”。
+                boolean inApprovedLeave = leaveService.withinApprovedLeave(
+                        obj.getId(), latest.getPointTime());
                 // 越界红点边沿
-                if (latest.getOutsideFence() && !alreadyOpen(obj.getId(), "GEOFENCE_BREACH")) {
+                if (!inApprovedLeave && latest.getOutsideFence() && !alreadyOpen(obj.getId(), "GEOFENCE_BREACH")) {
                     violationRepository.save(new ViolationEvent(obj, "GEOFENCE_BREACH",
                             "对象 " + obj.getMaskedName() + " 定位越出「" + obj.getOffice().getName()
                                     + "」活动范围，最近定位时间（" + obj.getOffice().getTimezone() + "）"
@@ -214,7 +222,7 @@ public class TrackService {
                     newBreach = true;
                 }
                 // 禁区红点边沿
-                if (Boolean.TRUE.equals(latest.getForbiddenZone())
+                if (!inApprovedLeave && Boolean.TRUE.equals(latest.getForbiddenZone())
                         && !alreadyOpen(obj.getId(), "FORBIDDEN_ZONE")) {
                     violationRepository.save(new ViolationEvent(obj, "FORBIDDEN_ZONE",
                             "对象 " + obj.getMaskedName() + " 在禁行时段进入「" + obj.getOffice().getName()

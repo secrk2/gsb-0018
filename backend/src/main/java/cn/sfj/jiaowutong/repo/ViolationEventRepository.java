@@ -12,4 +12,6 @@ public interface ViolationEventRepository extends JpaRepository<ViolationEvent, 
     List<ViolationEvent> findTop10ByOfficeIdAndReadFlagFalseOrderByEventTimeDesc(Long officeId);
 
     List<ViolationEvent> findTop20ByOffender_IdOrderByEventTimeDesc(Long offenderId);
+
+    List<ViolationEvent> findByOffender_IdAndReadFlagFalse(Long offenderId);
 }
